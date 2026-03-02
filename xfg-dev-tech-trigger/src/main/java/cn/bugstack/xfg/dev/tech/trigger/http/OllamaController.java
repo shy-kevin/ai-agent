@@ -13,21 +13,21 @@ import reactor.core.publisher.Flux;
 @Slf4j
 @RestController
 @CrossOrigin("*")
-@RequestMapping("/api/v1/ollama")
+@RequestMapping("/api/v1/ollama/")
 @RequiredArgsConstructor
 public class OllamaController implements IAiService {
 
     private final OllamaChatClient ollamaClient;
 
     @Override
-    @GetMapping("/generate")
+    @GetMapping("generate")
     public ChatResponse generate(@RequestParam String model,@RequestParam String message) {
         log.info("ollama generate model: {}, message: {}", model, message);
         return ollamaClient.call(new Prompt(message, OllamaOptions.create().withModel( model)));
     }
 
     @Override
-    @RequestMapping(value = "/generate_stream",method = {RequestMethod.GET})
+    @RequestMapping(value = "generate_stream",method = {RequestMethod.GET})
     public Flux<ChatResponse> generateStream(@RequestParam String model, @RequestParam String message) {
         log.info("ollama generate_stream model: {}, message: {}", model, message);
         return ollamaClient.stream(new Prompt(message, OllamaOptions.create().withModel( model)));
