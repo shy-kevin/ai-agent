@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI 对话助手</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .message-content {
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+        .thinking-text {
+            color: #6b7280;
+        }
+        #messages::-webkit-scrollbar {
+            width: 6px;
+        }
+        #messages::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 3px;
+        }
+        #messages::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+        #messages::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 min-h-screen">
+    <div class="max-w-4xl mx-auto h-screen flex flex-col">
+        <header class="bg-gradient-to-r from-blue-600 to-indigo-600 text-white py-4 px-6 shadow-lg">
+            <h1 class="text-xl font-semibold">AI 对话助手</h1>
+            <p class="text-blue-100 text-sm mt-1">基于 DeepSeek-R1 模型</p>
+        </header>
+
+        <div id="messages" class="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+            <div class="flex justify-center">
+                <div class="bg-white rounded-lg px-4 py-2 shadow-sm text-gray-500 text-sm">
+                    开始对话吧，输入您的问题
+                </div>
+            </div>
+        </div>
+
+        <div class="bg-white border-t border-gray-200 p-4">
+            <div class="flex gap-3">
+                <div class="flex-1 relative">
+                    <textarea 
+                        id="userInput" 
+                        placeholder="输入您的问题..." 
+                        class="w-full border border-gray-300 rounded-lg px-4 py-3 pr-12 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                        rows="1"
+                        onkeydown="handleKeyDown(event)"
+                    ></textarea>
+                </div>
+                <button 
+                    id="sendBtn"
+                    onclick="sendMessage()" 
+                    class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-medium transition-colors flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                    </svg>
+                    发送
+                </button>
+            </div>
+            <div class="mt-2 flex items-center gap-4 text-sm text-gray-500">
+                <span>模型: <select id="modelSelect" class="border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500">
+                    <option value="deepseek-r1:1.5b">deepseek-r1:1.5b</option>
+                    <option value="deepseek-r1:7b">deepseek-r1:7b</option>
+                </select></span>
+                <span id="statusText" class="text-gray-400">就绪</span>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE_URL = 'http://localhost:8090/api/v1/ollama';
+        let eventSource = null;
+        let isStreaming = false;
+
+        function handleKeyDown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                sendMessage();
+            }
+        }
+
+        function addMessage(content, isUser, isThinking = false) {
+            const messagesContainer = document.getElementById('messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `flex ${isUser ? 'justify-end' : 'justify-start'}`;
+            
+            const bubbleClass = isUser 
+                ? 'bg-blue-600 text-white' 
+                : 'bg-white text-gray-800 shadow-sm';
+            
+            const thinkingClass = isThinking ? 'thinking-text' : '';
+            
+            messageDiv.innerHTML = `
+                <div class="max-w-[80%] ${bubbleClass} rounded-lg px-4 py-3 message-content ${thinkingClass}">
+                    ${isThinking ? '<span class="inline-block animate-pulse">▌</span>' : ''}${escapeHtml(content)}
+                </div>
+            `;
+            
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            
+            return messageDiv;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function updateStatus(text, isLoading = false) {
+            const statusText = document.getElementById('statusText');
+            statusText.textContent = text;
+            statusText.className = isLoading ? 'text-blue-500' : 'text-gray-400';
+        }
+
+        function setStreamingState(streaming) {
+            isStreaming = streaming;
+            const sendBtn = document.getElementById('sendBtn');
+            const userInput = document.getElementById('userInput');
+            
+            if (streaming) {
+                sendBtn.disabled = true;
+                sendBtn.innerHTML = `
+                    <svg class="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    生成中
+                `;
+                userInput.disabled = true;
+            } else {
+                sendBtn.disabled = false;
+                sendBtn.innerHTML = `
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                        <path d="M10.894 2.553a1 1 0 00-1.788 0l-7 14a1 1 0 001.169 1.409l5-1.429A1 1 0 009 15.571V11a1 1 0 112 0v4.571a1 1 0 00.725.962l5 1.428a1 1 0 001.17-1.408l-7-14z" />
+                    </svg>
+                    发送
+                `;
+                userInput.disabled = false;
+            }
+        }
+
+        function sendMessage() {
+            const userInput = document.getElementById('userInput');
+            const message = userInput.value.trim();
+            
+            if (!message || isStreaming) return;
+            
+            const model = document.getElementById('modelSelect').value;
+            
+            addMessage(message, true);
+            userInput.value = '';
+            
+            setStreamingState(true);
+            updateStatus('正在连接...', true);
+            
+            const aiMessageDiv = addMessage('', false, true);
+            let fullContent = '';
+            
+            const encodedMessage = encodeURIComponent(message);
+            const apiUrl = `${API_BASE_URL}/generate_stream?model=${model}&message=${encodedMessage}`;
+            
+            eventSource = new EventSource(apiUrl);
+            
+            eventSource.onopen = function() {
+                updateStatus('正在生成回答...', true);
+            };
+            
+            eventSource.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    
+                    if (data.result && data.result.output) {
+                        const content = data.result.output.content || '';
+                        fullContent += content;
+                        
+                        const bubble = aiMessageDiv.querySelector('.message-content');
+                        bubble.innerHTML = `<span class="inline-block animate-pulse">▌</span>${escapeHtml(fullContent)}`;
+                        
+                        const messagesContainer = document.getElementById('messages');
+                        messagesContainer.scrollTop = messagesContainer.scrollHeight;
+                    }
+                    
+                    if (data.result && data.result.metadata && data.result.metadata.finishReason === 'STOP') {
+                        eventSource.close();
+                        setStreamingState(false);
+                        updateStatus('就绪');
+                        
+                        const bubble = aiMessageDiv.querySelector('.message-content');
+                        bubble.innerHTML = escapeHtml(fullContent);
+                        bubble.classList.remove('thinking-text');
+                    }
+                } catch (e) {
+                    console.error('解析响应数据失败:', e);
+                }
+            };
+            
+            eventSource.onerror = function(error) {
+                console.error('EventSource 错误:', error);
+                eventSource.close();
+                setStreamingState(false);
+                updateStatus('连接失败，请重试');
+                
+                const bubble = aiMessageDiv.querySelector('.message-content');
+                if (fullContent) {
+                    bubble.innerHTML = escapeHtml(fullContent);
+                } else {
+                    bubble.innerHTML = '<span class="text-red-500">抱歉，发生了错误，请重试。</span>';
+                }
+                bubble.classList.remove('thinking-text');
+            };
+        }
+
+        document.getElementById('userInput').addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+        });
+    </script>
+</body>
+</html>
