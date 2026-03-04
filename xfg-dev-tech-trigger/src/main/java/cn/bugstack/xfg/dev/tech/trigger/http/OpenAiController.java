@@ -12,8 +12,8 @@ import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.ai.chat.prompt.SystemPromptTemplate;
 import org.springframework.ai.document.Document;
-import org.springframework.ai.ollama.OllamaChatClient;
-import org.springframework.ai.ollama.api.OllamaOptions;
+import org.springframework.ai.openai.OpenAiChatClient;
+import org.springframework.ai.openai.OpenAiChatOptions;
 import org.springframework.ai.vectorstore.PgVectorStore;
 import org.springframework.ai.vectorstore.SearchRequest;
 import org.springframework.web.bind.annotation.*;
@@ -27,14 +27,15 @@ import java.util.stream.Collectors;
 @Slf4j
 @RestController
 @CrossOrigin("*")
-@RequestMapping("/api/v1/ollama/")
+@RequestMapping("/api/v1/openai/")
 @RequiredArgsConstructor
-@Tag(name = "Ollama AI 对话管理", description = "AI 对话相关接口") // OpenAPI 3.0 注解
-public class OllamaController implements IAiService {
+@Tag(name = "OpenAi AI 对话管理", description = "AI 对话相关接口") // OpenAPI 3.0 注解
+public class OpenAiController implements IAiService {
 
-    private final OllamaChatClient ollamaClient;
+    private final OpenAiChatClient openAiChatClient;
 
     private final PgVectorStore pgVectorStore;
+
 
     @Override
     @GetMapping("generate")
@@ -43,7 +44,7 @@ public class OllamaController implements IAiService {
             @Parameter(description = "AI 模型名称 (如：deepseek-r1:1.5b)", required = true) @RequestParam String model,
             @Parameter(description = "用户输入的消息内容", required = true) @RequestParam String message) {
         log.info("ollama generate model: {}, message: {}", model, message);
-        return ollamaClient.call(new Prompt(message, OllamaOptions.create().withModel( model)));
+        return openAiChatClient.call(new Prompt(message, OpenAiChatOptions.builder().withModel( model).build()));
     }
 
     @Override
@@ -53,14 +54,14 @@ public class OllamaController implements IAiService {
             @Parameter(description = "AI 模型名称 (如：deepseek-r1:1.5b)", required = true) @RequestParam String model,
             @Parameter(description = "用户输入的消息内容", required = true) @RequestParam String message) {
         log.info("ollama generate_stream model: {}, message: {}", model, message);
-        return ollamaClient.stream(new Prompt(message, OllamaOptions.create().withModel( model)));
+        return openAiChatClient.stream(new Prompt(message, OpenAiChatOptions.builder().withModel( model).build()));
     }
 
     @RequestMapping(value = "generate_stream_rag", method = RequestMethod.GET)
     @Operation(summary = "rag知识库流式生成对话响应", description = "根据模型和消息内容流式生成 AI 对话响应，适合长文本输出")
     @Override
-    public Flux<ChatResponse> generateStreamRag(String model, String ragTag, String message) {
-        log.info("ollama generate_stream_rag model: {}, ragTag: {}, message: {}", model, ragTag, message);
+    public Flux<ChatResponse> generateStreamRag(@RequestParam String model, @RequestParam String ragTag, @RequestParam String message){
+        log.info("openai generate_stream_rag model: {}, ragTag: {}, message: {}", model, ragTag, message);
         String SYSTEM_PROMPT = """
                 Use the information from the DOCUMENTS section to provide accurate answers but act as if you knew this information innately.
                 If unsure, simply state that you don't know.
@@ -69,7 +70,7 @@ public class OllamaController implements IAiService {
                     {documents}
                 """;
 
-        SearchRequest searchRequest = SearchRequest.query( message).withTopK(5).withFilterExpression("knowledge == '"+ragTag+"'");
+        SearchRequest searchRequest = SearchRequest.query( message).withFilterExpression("knowledge == '"+ragTag+"'");
         List<Document> documents = pgVectorStore.similaritySearch(searchRequest);
         log.info("搜索到 {} 个文档片段", documents.size());
         String collect = documents.stream().map(Document::getContent).collect(Collectors.joining());
@@ -79,9 +80,9 @@ public class OllamaController implements IAiService {
         ArrayList<Message> messages = new ArrayList<>();
         messages.add(new UserMessage( message));
         messages.add(ragMessage);
-
         log.info("messages: {}", messages);
 
-        return ollamaClient.stream(new Prompt(messages, OllamaOptions.create().withModel( model)));
+        return openAiChatClient.stream(new Prompt(messages, OpenAiChatOptions.builder().withModel( model).build()));
     }
+
 }

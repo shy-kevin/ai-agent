@@ -2,6 +2,11 @@ server:
   port: 8090
 
 spring:
+  # JVM 代理配置（用于 JGit 访问 GitHub）
+  http:
+    proxy:
+      host: 127.0.0.1
+      port: 7890
   datasource:
     driver-class-name: org.postgresql.Driver
     username: postgres
@@ -33,6 +38,14 @@ spring:
         options:
           num-batch: 512
         model: nomic-embed-text
+    openai:
+      base-url: https://dashscope.aliyuncs.com/compatible-mode
+      api-key: sk-47cc9280cea84012a3b92588aa76ea68
+      embedding:
+        options:
+          model: text-embedding-v3
+    rag:
+      embed: nomic-embed-text
 
 # Redis
 redis:
